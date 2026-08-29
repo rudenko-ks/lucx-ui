@@ -44,27 +44,31 @@ value defeats the point, since DPI can fingerprint it over time.
 | **Jc**       | Number of junk packets sent before the handshake.                            |
 | **Jmin/Jmax** | Size range (bytes) for those junk packets. `Jmin` must not exceed `Jmax`.     |
 | **S1/S2**    | Padding added to the handshake init/response packets. `S1 + 56` must not equal `S2` — amneziawg-go rejects a value that would make both packets the same size. |
-| **S3**       | Cookie-reply padding, `0`-`64`.                                               |
-| **S4**       | Transport (data) packet padding, `0`-`32`.                                    |
+| **S3**       | Cookie-reply padding, `0`-`64` — but at least `12` whenever a `HeaderProtectionKey` is set, which it is by default. |
+| **S4**       | Transport (data) packet padding, `0`-`32` — same `12` floor as `S3` while a key is set. |
 | **H1-H4**    | Magic header values that replace WireGuard's standard message-type bytes. Each is a single integer or a `low-high` range; `1`-`4` are reserved (real WireGuard message types) and must not be used. |
 | **I1-I5**    | Optional signature packets — random bytes prepended before the handshake, e.g. `<r 148>`. Generated sets fill `I1` only, matching Amnezia's own generator. |
-| **HeaderProtectionKey** | A base64 32-byte key for the 3.0 header-protection mechanism. Must match on every client config; blank disables it. |
+| **HeaderProtectionKey** | A base64 32-byte key for the 3.0 header-protection mechanism. Must match on every client config; blank disables it. Exactly 32 bytes, base64-encoded, on a single line — the panel refuses to save anything else, and a key pasted across two lines is rejected rather than silently truncated. Setting a key also raises the minimum for every one of `S1`-`S4` to `12`; since the panel generates a key by default, that floor is the normal case. |
 | **ContentPaddingAddition** | A single integer or `low-high` byte range of extra padding on content packets. Kept `<= 64` by the generator so a 1420-MTU tunnel doesn't fragment. |
 | **RekeyAfterTime / RekeyTimeout / RejectAfterTime / KeepaliveTimeout / MaxHandshakeAttempts** | Handshake-timing randomization: each is a `low-high` range (seconds; attempts for the last one) the peer samples from, so session timing stops being a WireGuard fingerprint. Every `RekeyAfterTime` value must stay below every `RejectAfterTime` value. Blank keeps the WireGuard default. |
-| **RandomTrailers** | Appends a random number of bytes to the end of every packet.                 |
+| **RandomTrailers** | Appends a random number of bytes to the end of every packet. Must be enabled on both ends: the config carries it, so a 3.1-capable client turns it on itself, but an older client will not connect at all, and reports no error. On in a generated set. |
 | **DisableCookies** | Never send cookie replies — removes a DPI-visible WireGuard message type, at the cost of WireGuard's handshake-flood mitigation. |
 
 <Callout type="info">
   If you enter obfuscation values by hand instead of using the generated
-  defaults, keep `H1`-`H4` **non-overlapping** and above `4`, and double-check
-  `S1 + 56 != S2` — a bad value here keeps the embedded interface from
-  coming up at all.
+  defaults, keep `H1`-`H4` **non-overlapping** and above `4` — nothing checks
+  that for you, and an overlapping value keeps the embedded interface from
+  coming up at all. Two other constraints are checked, and the panel refuses
+  to save the inbound when either is broken: `S1 + 56 != S2`, and `S1`-`S4`
+  all `>= 12` while a `HeaderProtectionKey` is set.
 </Callout>
 
 <Callout type="warn">
   The 3.1 parameters need a **3.1-capable client**. Clients must run a
   3.1-capable Amnezia app; blanking the 3.1 fields renders a config older
-  clients still understand. There is no host-side version requirement —
+  clients still understand. `RandomTrailers` in particular has no wire
+  negotiation: an older client hands back no error, it simply never completes
+  a handshake. There is no host-side version requirement —
   the panel ships its own pinned `amneziawg-go`, not whatever happens to be
   installed on the system.
 </Callout>
@@ -126,8 +130,9 @@ decapsulated.
 
 ## What the configuration looks like
 
-A client's downloadable `.conf` (also what the `vpn://` share link encodes,
-base64url'd) looks like this:
+A client's downloadable `.conf` looks like this. The `vpn://` share link
+carries the same settings, but not as this text: it is base64url of a
+zlib-compressed Amnezia JSON container that the official apps import.
 
 ```ini title="client .conf"
 [Interface]
@@ -140,7 +145,7 @@ Jmax = 220
 S1 = 87
 S2 = 44
 S3 = 21
-S4 = 9
+S4 = 17
 H1 = 462980921-463150218
 H2 = 1177681572-1177787900
 H3 = 1907413509-1907903969
