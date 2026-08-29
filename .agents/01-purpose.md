@@ -24,7 +24,7 @@ LucX-UI is a fork of [3x-ui](https://github.com/MHSanaei/3x-ui) (currently **v3.
 **Minimal invasion for easy upstream sync.** The goal is: every upstream release should be a near-trivial port. This means:
 - LucX code lives in isolated packages (`internal/awg/`, `internal/lucx/`), not scattered across upstream files.
 - Upstream files get ONLY `LUCX-HOOK` blocks — never free-form edits.
-- The AWG sidecar should be as thin as the MTProto sidecar. If mtproto does it in N files, AWG should aim for N too. (Known Issue #1 is closed — core package is at 9 files, exact parity with mtproto.)
+- The AWG sidecar should be as thin as the MTProto sidecar, for the code it shares with it. Parity is NOT a live measurement: `internal/awg/` is 23 non-test files (43 with tests) plus the `cps/`, `signature/` and `vpnuri/` subpackages, against 6 non-test files in `internal/mtproto/`. The difference is product — import, diagnostics, `awgo-N` outbounds, port forwards, kernel/gVisor fallback — not bloat. See `04-current-state.md` Known Issue #1: **do not re-slim.**
 
 **AWG sidecar = mtproto pattern.** AWG runs as a kernel-interface sidecar exactly symmetric with `internal/mtproto/`:
 

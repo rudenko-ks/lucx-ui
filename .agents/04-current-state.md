@@ -10,7 +10,9 @@ Changelog: `progress.md`, last 1–2 entries only.
 
 ### 1. ~~AWG sidecar bloated vs mtproto (the baseline)~~ — CLOSED
 
-**Resolved (2026-07-13):** refactor by deleting dead code. Files `params.go`, `cps.go`, `config.go`, `templates.go`, `types.go`, `helpers.go` + 5 tests were fully dead — their functions (`GenerateAWGParams`, `GenerateCPS`, `BuildServerConfig`, `RenderPostUp`, etc.) were only called by tests, no live call site used them. Key/obfuscation generation is done in the frontend (`createDefaultAwgInboundSettings`). AWG cut from 19 to 8 files (6 .go + 2 tests) — nearly symmetric with mtproto (9 files). Upstream updates now need ~20 files ported instead of 29.
+**Resolved (2026-07-13) — HISTORICAL, do not act on the state it describes:** refactor by deleting dead code. Files `params.go`, `cps.go`, `config.go`, `templates.go`, `types.go`, `helpers.go` + 5 tests were dead *at that time* — their functions were only called by tests. AWG was cut from 19 to 8 files.
+
+**Superseded:** `GenerateAWGParams` and `GenerateCPS` came back and are live — `controller/awg.go:78` and `:86`, behind `POST /panel/api/inbounds/awg/generateObfuscation`. Obfuscation generation is NOT frontend-owned: the controller comment at `:53-57` is explicit that "the panel — not the browser — owns the RNG and the invariant-enforcing logic" (the frontend `createDefaultAwgInboundSettings` only seeds the form before the first save). File counts have moved too — see Known Issue #1's parity claim, corrected in `01-purpose.md`.
 
 **Finished (2026-07-18):** slimming toward mtproto parity. `cps/` and `signature/` stay separate. **Do not re-slim:** import, diagnostics, outbound (`awgo-N`), portfwd, vpnuri, kernel/gVisor fallback are live product, not dead mtproto copies. A second Amnezia path (`protocol=amneziawg` / `amneziawgnet`) exists for no-module hosts — do not mix with kernel `protocol=awg` on the same iface name without checking.
 
@@ -57,6 +59,8 @@ Not to re-add: tun2socks (replaced by TUN inbound), DNS in the server .conf (bre
 3. Generator `GenerateAWGParams` (`cps/params.go`) now **guarantees S1–S4 ≥ 12** (`MinSForHPK = 12`, `enforceSMin`) for all profiles — config is valid for AWG3 whether or not HPK is set. `GenerateHeaderProtectionKey()` + `AWGParams.WithHeaderProtectionKey()` generate the key (crypto/rand, 32 bytes, base64).
 4. New field `awgVersion` (`"1.5"`/`"2"`/`"3"`) across the pipeline — on the inbound (server ceiling) and in client export (≤ ceiling, runtime selector in `ClientQrModal`/`ClientInfoModal`).
 5. Migration renamed: `pruneAwgHeaderProtectionKey` → `migrateAwgVersion` (`migrate_awg_hpk.go`). Now backfills `awgVersion:"2"` on pre-lucx.50 inbounds/outbounds AND clears non-empty HPK from anything that isn’t v3 (fix for lucx.47 regression victims + guard against a future version bump).
+
+**Since lucx.117 — items 1, 2 and 4 above describe lucx.50, not today.** The ceiling gained `"3.1"`, so the gate is `IsAwg3Plus` (`"3"` and `"3.1"`), never `awgVersion == "3"`. And version alone no longer decides: `renderServerConf`/`renderClientConf` additionally require `ModuleSupportsAwg3()`, while `generateObfuscation` (`awgWithHPK`) and `inboundAwgHints` use `AwgVersionFieldsAllowed(IsAwg3Plus, localInbound, ModuleSupportsAwg3)` — a remote node is trusted for its own module support, so the answer depends on the target node. “Non-empty” is `strings.TrimSpace(...) != ""` in every one of them.
 
 **Lesson (still holds):** “Regenerate obfuscation” silently writes into the form everything the backend returned. Any field unsupported by the current kernel → reconcile crash. Solution — version-gate emission, not full silence: the field is returned/written only when the version explicitly supports it.
 

@@ -121,15 +121,17 @@ Extracted from AGENTS.md. This file is project law.
 
 ### Pattern 6: AWG client won’t connect — server version vs client version (lucx.50+)
 - **Cause:** The real compatibility boundary is the **server** config, not client-config length. AmneziaWG fields split into:
-  - **must-match** (server↔client must match): `S1`–`S4`, `H1`–`H4`, `HeaderProtectionKey`. If server is v3 (with HPK) and client is v2 — handshake fails on must-match fields.
+  - **must-match** (server↔client must match): `S1`–`S4`, `H1`–`H4`, `HeaderProtectionKey`, `RandomTrailers`. If server is v3 (with HPK) and client is v2 — handshake fails on must-match fields. `RandomTrailers` is the quiet one: no wire negotiation, so an older client neither errors nor connects (`awgRandomTrailersHint`, `en-US.json:703`; `generateObfuscation` deliberately leaves it off, `controller/awg.go:155-157`).
   - **may-differ**: `Jc`/`Jmin`/`Jmax`, `I1`–`I5`.
   - **version-gated**: `S3`/`S4` + `I1`–`I5` appeared in AWG v2 (Android 2.0.1); `HeaderProtectionKey` — in AWG v3 (desktop 5.0.0.5 / Android 3.0.1).
 - **Fix:**
   - The `awgVersion` selector on the inbound sets the **server ceiling** — which fields the server will accept. A v3 server will NOT accept v1/v2/plain-WG clients (HPK cryptographically breaks compatibility).
   - For a mixed client fleet (some old, some new) — **create a separate v2 inbound** (no HPK). A v2 server accepts both v2 and v1.5 clients.
   - In the client modal (`ClientQrModal`/`ClientInfoModal`) the “Client config version” selector lets you export a config ≤ the inbound ceiling. That only **avoids parse errors** in an old client app (extra fields are stripped), but does NOT give compatibility if the client is older than the server.
-  - ⚠️ HPK requires S1–S4 ≥ 12 (generator guarantees it; on manual input check — form shows `awgSRangeWarning`).
-- **Symptom:** client hangs on handshake, server logs show `awg0` peer with no handshake. Compare must-match fields in server `.conf` (`/etc/awg/awgN.conf`) and client — any mismatch = the cause.
+  - ⚠️ HPK requires S1–S4 ≥ 12. This is no longer only the form hint `awgSRangeWarning` (`en-US.json:706`) — **both** protocols now refuse the save, so a hand-typed 9 never reaches the kernel's `-EINVAL`:
+    - kernel `awg`: `validateAwgSettingsJSON` → `AWGParams.Validate` (`cps/params.go:452-458`), called from `AddInbound` (`inbound.go:1839`) and `UpdateInbound` (`:2522`). One escape hatch — the function returns early when `Jc == 0 && S1 == 0`, so a fully blank obfuscation block skips the whole check.
+    - embedded `amneziawg`: `ValidateObfuscation` (`internal/amneziawg/params.go:156-162`), via `normalizeAmneziaWGSettings` from `AddInbound` (`:1821`) and `UpdateInbound` (`:2442`). No escape hatch.
+- **Symptom:** client hangs on handshake, server logs show `awg0` peer with no handshake. Compare must-match fields in server `.conf` (`/etc/amnezia/amneziawg/awgN.conf` — `awgConfigDir`, `process.go:31`; **not** `/etc/awg/`) and client — any mismatch = the cause.
 - **What clients actually support (snapshot 2026-08-14, issue #44 analysis).** The panel issues a correct AWG3 config; “won’t import” almost always is the client, not the server:
 
   | Client | Version at snapshot | AWG 3 / HPK | AWG 3.1 |
@@ -199,8 +201,8 @@ Extracted from AGENTS.md. This file is project law.
 ### Pattern 1w: Pro QUIC I1–I5 crashes awg-tools (segfault / glibc abort) — FIXED (lucx.156)
 
 - **Cause:** tools netlink buffer is one page (4096). I1–I5 are hex-put without bounds. QUIC Pro sum 1696–2044 B → ~35% of generated configs crash `awg set`/`setconf` on Linux.
-- **Fix:** `GenerateCPS` keeps payload ≤ 1800 B (retry, then drop I5…I2). Real fix is upstream [amneziawg-tools#69](https://github.com/amnezia-vpn/amneziawg-tools/issues/69).
-- **Not done:** MTU-clamp of I1 (needs form to send MTU). I1 stays ~1198 (QUIC minimum).
+- **Fix:** `GenerateCPS` takes the budget as a parameter (`maxIBytes`, `cps/cps.go:48`); the caller passes `awg.WorstCaseIBytesBudget(withHPK)` (`controller/awg.go:44,92`). That is **3492 bytes**, or 3456 with a header-protection key — computed in `cps_budget.go:17-76` as `4096 − 296 − 8 − 4 − 256 − 40`, not the 1800 this entry used to claim. It redraws up to `generateAttempts` times and then **fails** with `ErrCPSBudgetExceeded` ("pick a lighter mimicry profile"); it does NOT shed I5…I2 — a set the operator cannot save beats one that silently carries fewer packets than asked for. Real fix is upstream [amneziawg-tools#69](https://github.com/amnezia-vpn/amneziawg-tools/issues/69).
+- **Per-packet clamp IS done:** `MaxIPacketBytes = 1400` (`cps_budget.go:78-82`), enforced on every packet in `cps/descriptor.go`. 1400 sits under the worst common UDP payload ceiling (1444 on IPv6-over-PPPoE) and above the 1200 bytes RFC 9000 requires of a QUIC Initial, so I1 stays ~1198.
 
 ### Pattern 1y: kernel card Stopped / 0 interfaces while module is loaded — FIXED (lucx.173)
 

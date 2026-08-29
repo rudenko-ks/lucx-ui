@@ -174,8 +174,8 @@ stays on the last stable tag.
 4. Start panel, migrate, fail2ban; if a new kernel was installed — **reboot in 10s** (AWG module already built for the new kernel; panel comes up via systemd).
 
 ### VPS build dependencies
-- Go 1.23+ (1.26 recommended)
-- Node.js 20+ and npm
+- Go 1.27+ (`go.mod` declares `go 1.27.0`)
+- Node.js 24 and npm — the version in `.nvmrc`; Vite 8 won't build on Node 20
 - gcc (for CGO)
 - git, curl, tar
 
@@ -215,7 +215,7 @@ Tunnel sidecars (gzipped) live in `third_party/sidecars/linux-amd64/`. GitHub am
 ## Frontend Conventions
 
 - Ant Design 6 only — no Tailwind/shadcn.
-- TS strict; `@typescript-eslint/no-explicit-any` is an error. Zod schemas in `src/schemas/` are the source of truth; infer types with `z.infer`, never hand-write. Do not edit `src/generated/`.
+- TS strict; the frontend lints with **oxlint** (`frontend/package.json` → `"lint": "oxlint src tools"`), so the rule id is `typescript/no-explicit-any`, not the ESLint `@typescript-eslint/` name. It is an error. Zod schemas in `src/schemas/` are the source of truth; infer types with `z.infer`, never hand-write. Do not edit `src/generated/`.
 - Editing `frontend/src` does NOT change what users see until the Vite build is regenerated into `internal/web/dist/`.
 - After touching share-link logic (`src/lib/xray/`), run `npm run test` (golden fixtures).
 
@@ -224,7 +224,7 @@ Tunnel sidecars (gzipped) live in `third_party/sidecars/linux-amd64/`. GitHub am
 ## Go Conventions
 
 - Stdlib `testing` only (no testify). Table-driven, `t.Run` subtests.
-- NO `//` line comments in committed Go/TS (except directives like `//go:build`). Names carry meaning. (Inherited from upstream CLAUDE.md — applies to upstream code; LucX HOOK blocks may carry the `// LUCX-HOOK:` marker comment by design.)
+- Comments in committed Go/TS: **2 lines MAX per comment block** — the rule in root `CLAUDE.md`, and what the codebase actually follows. Make the name carry the meaning first; spend the two lines on the *why* a name cannot hold (an invariant, an issue number, a non-obvious constraint). Directives (`//go:build`, `//go:generate`) and the `// LUCX-HOOK:` marker are exempt. (This line used to say "NO `//` line comments" — that was never the standard here and would strip the why-comments the code is required to carry.)
 - `golangci-lint run` / `make lint` for formatting (gofumpt + goimports).
 - Conventional-commit prefixes, Russian commit messages.
 

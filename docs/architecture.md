@@ -19,15 +19,18 @@ Xray JSON config from that state, supervises the Xray child process, and exposes
 WebSocket API. A React SPA (built by Vite, embedded into the Go binary) is the UI. A second,
 separate HTTP server serves **subscription links** to end users.
 
-The panel supervises **two managed child processes**: Xray-core itself and — when MTProto
-inbounds exist — the `mtg-multi` Telegram-proxy binary (`github.com/mhsanaei/mtg-multi`, a
-multi-secret fork built from source; `internal/mtproto/`). One process per inbound serves
+Xray-core is the panel's main managed child process, but not its only one. When MTProto
+inbounds exist it also supervises the `mtg-multi` Telegram-proxy binary
+(`github.com/mhsanaei/mtg-multi`, a multi-secret fork; **not** a Go dependency — it is not
+in `go.mod`, and `DockerInit.sh` downloads the prebuilt release binary for the target
+rather than compiling it; panel-side code in `internal/mtproto/`). One process per inbound serves
 every attached client's FakeTLS secret through the fork's `[secrets]` section, plus optional
 per-client sponsored-channel ad-tags via `[secret-ad-tags]`. A client or ad-tag edit is
 hot-applied via the fork's management API (`PUT /secrets`, guarded by a per-process bearer
 token), with a process restart as the fallback on older binaries.
 
-Servers and processes, all launched from `main.go`:
+Servers and processes. The first three start from `main.go`; the sidecars below them are
+brought up by their reconcile jobs (§5.4) as inbounds need them:
 
 | Server / process | Package                           | Purpose                                                            | Default port      |
 | ---------------- | --------------------------------- | ------------------------------------------------------------------ | ----------------- |
@@ -35,6 +38,8 @@ Servers and processes, all launched from `main.go`:
 | **Subscription** | `internal/sub`                    | Public endpoint that hands out client configs (raw / JSON / Clash) | `subPort` setting |
 | **Xray-core**    | supervised via `internal/xray`    | The actual proxy engine; a child process, not Go code              | `inbounds[].port` |
 | **mtg-multi**    | supervised via `internal/mtproto` | MTProto proxy child process for MTProto inbounds (multi-secret)    | per inbound       |
+| **Tunnel sidecars** | supervised via `internal/lucx/tunnel` | One long-running child per tunnel inbound: Caddy/NaiveProxy, olcRTC, qWDTT, mieru, TrustTunnel, AnyTLS. Reconciled by `tunnel_job` | per inbound |
+| **awg-quick**    | driven via `internal/awg`         | Not a daemon — `awg-quick up/down` brings a kernel AmneziaWG interface (`awgN`, `awgo-N`) up and down; `awg_job` reconciles them every 10s | per inbound (UDP) |
 
 Two key ideas that explain most of the complexity:
 
@@ -244,6 +249,25 @@ node heartbeat every 5s, periodic traffic resets (hourly/daily/weekly/monthly). 
 │   │
 │   ├── mtproto/              # Embedded MTProto (Telegram) proxy: manager.go + per-OS
 │   │                         #   process supervision + orphan cleanup
+│   │
+│   ├── awg/                  # ⭐ Kernel AmneziaWG (`awg` protocol): Manager/Instance/Process
+│   │   │                     #   over awg-quick, server+client .conf renderers, diagnostics,
+│   │   │                     #   host import, awgo-N outbound clients. File-level map:
+│   │   │                     #   .agents/02-architecture.md
+│   │   ├── cps/              #   CPS packet generators (TLS/DNS/SIP/QUIC) + AWGParams presets
+│   │   ├── signature/        #   QUIC host capture → I1-I5
+│   │   └── vpnuri/           #   vpn:// encode/decode (Amnezia JSON container, qCompress'd)
+│   ├── amneziawg/            # Embedded AmneziaWG (`amneziawg` protocol) protocol shape:
+│   │                         #   instance/peer derivation, 3.1 param generation + validation
+│   │                         #   (ValidateObfuscation runs on the inbound save path)
+│   ├── amneziawgnet/         # …and its runtime: amneziawg-go over a gVisor netstack,
+│   │                         #   per-inbound reconcile, relay into a per-peer loopback SOCKS5
+│   ├── lucx/                 # Smart Cluster + tunnel sidecars (parser/, nodetype/,
+│   │                         #   outbound_link/, tunnel/ — Naive, olcRTC, qWDTT, mieru,
+│   │                         #   TrustTunnel, AnyTLS)
+│   ├── crypto/nodetoken/     # Node keyring: startup keys from a protected file or env,
+│   │                         #   never from the command line
+│   │
 │   ├── logger/              # App logger (op/go-logging + lumberjack rotation)
 │   └── util/                # Leaf helpers (no business logic):
 │       ├── common/          #   errors, misc
@@ -374,10 +398,15 @@ All registered in `web.go` → `startTask()`. Each is a struct with a `Run()` me
 | `@every 10s`        | `check_client_ip_job`                                                                            | Enforce per-client IP limits                                                    |
 | `@every 10s`        | `mtproto_job`                                                                                    | Reconcile `mtg` sidecars against enabled MTProto inbounds                       |
 | `@every 10s`        | `amneziawg_job`                                                                                  | Reconcile embedded AmneziaWG interfaces against enabled local inbounds          |
+| `@every 10s`        | `awg_job`                                                                                        | Reconcile kernel `awg` interfaces + fold AWG traffic/online (LucX)              |
+| `@every 10s`        | `tunnel_job`                                                                                     | Reconcile tunnel sidecars + Naive access-log traffic/online (LucX)              |
 | `@every 5m`         | `outbound_subscription_job`                                                                      | Refresh outbound provider configs                                               |
+| `@every 5m`         | `reap_sync_orphans_job`                                                                          | Hard-delete clients the node-snapshot sweep soft-orphaned, after enough clean merges agree |
+| `@every 5m`         | `remote_routing_job`                                                                             | Keep the remote Happ / Clash routing-rule URLs warm (all network work off the request path) |
 | `@every 10m`        | `clear_logs_job` (`PruneXrayLogsJob`)                                                            | Truncate Xray access/error logs once either exceeds 64 MiB                      |
 | `@hourly`           | `warp_ip_job`, `periodic_traffic_reset_job("hourly")`                                            | WARP IP rotation; traffic resets                                                |
 | `@daily`            | `clear_logs_job`, `periodic_traffic_reset_job("daily")`, `periodic_traffic_reset_job("monthly")` | IP-limit and Xray access/error log cleanup; daily resets and due monthly resets |
+| `@daily`            | `log_retention_job`                                                                              | Delete log files older than `logRetentionDays` (0 = off); never touches files still held open |
 | `@weekly`           | `periodic_traffic_reset_job("weekly")`                                                           | Weekly traffic resets                                                           |
 | default `@every 1m` | `ldap_sync_job`                                                                                  | Only if LDAP enabled; schedule configurable                                     |
 | default `@daily`    | `stats_notify_job`                                                                               | Only if TG bot enabled; schedule configurable                                   |
