@@ -274,14 +274,14 @@ LucX-UI бесплатен для личного использования. **�
 <details>
 <summary><b>Архитектура, сборка и upstream sync (нажмите, чтобы развернуть)</b></summary>
 
-**Архитектура и правило изоляции.** Весь код LucX живёт в изолированных пакетах (`internal/awg/`, `internal/lucx/`); изменения файлов upstream 3x-ui вносятся только внутри маркеров `// LUCX-HOOK` / `// END LUCX-HOOK`, поэтому каждый upstream-релиз сводится к почти тривиальному портированию. См. [AGENTS.md](AGENTS.md) — полная карта архитектуры, 10 правил, известные проблемы и шаблоны отладки.
+**Архитектура и правило изоляции.** Весь код LucX живёт в изолированных пакетах (`internal/awg/`, `internal/lucx/`); изменения файлов upstream 3x-ui вносятся только внутри маркеров `// LUCX-HOOK` / `// END LUCX-HOOK`, поэтому каждый upstream-релиз сводится к почти тривиальному портированию. См. [`.agents/00-index.md`](.agents/00-index.md) — карта архитектуры, правила, известные проблемы и шаблоны отладки; [AGENTS.md](AGENTS.md) остался коротким указателем на них.
 
-**Сборка из исходников** (требуется Go 1.23+, Node.js 20+, gcc — только Linux, CGO для SQLite):
+**Сборка из исходников** (требуется Go 1.27+, Node.js 24 (`.nvmrc`), gcc — только Linux, CGO для SQLite):
 
 ```bash
 cd frontend && npm run build && cd ..
 go build -o /tmp/x-ui .
-# проверка перед push: bin/check-lucx.sh  (gofumpt на 49 файлах LucX)
+# проверка перед push: bin/check-lucx.sh  (gofumpt на файлах LucX; список считается на лету)
 ```
 
 **Процедура upstream sync** (проверено на v3.5.0→v3.6.0, 103 коммита / 432 файла / 7 конфликтов):
@@ -289,7 +289,7 @@ go build -o /tmp/x-ui .
 ```bash
 git fetch origin --tags
 git merge --no-commit --no-ff origin/main
-# разрешать блок за блоком (см. AGENTS.md правило 8) — никогда не использовать blanket --ours/--theirs
+# разрешать блок за блоком (см. .agents/05-rules.md, правило 8) — никогда не использовать blanket --ours/--theirs
 git grep -c "LUCX-HOOK"  # сравнить количество маркеров до/после, чтобы выявить потерянные блоки
 go build ./... && go vet ./... && go test ./internal/awg/... ./internal/lucx/...
 ```
