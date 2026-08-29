@@ -41,6 +41,13 @@ file locations when it can answer in one hop.
 - `internal/xray/geodata/` — streaming geosite/geoip `.dat` reader (cached
   category index + paged entries) and `geosite:`/`geoip:`/`ext:` token parsing.
 - `internal/mtproto/` — MTProto inbounds via the bundled `mtg-multi` binary.
+- `internal/awg/` — kernel AmneziaWG (the `amneziawg` module + `awg`/`awg-quick`
+  tools), the largest of the three AWG packages: renders the server and client
+  `.conf`, derives the device fingerprint that decides when an interface must be
+  recreated, generates CPS descriptors and budgets `I1`-`I5` against the netlink
+  read limit, reconciles inbound `awgN` and outbound `awgo-N` interfaces, and
+  probes the host's module/tools versions. Not to be confused with the two
+  packages below, which are the userspace implementation.
 - `internal/amneziawg/` — AmneziaWG protocol shape: instance/peer derivation
   from an inbound, 3.1 obfuscation param generation + validation, port-forward
   spec parsing.
